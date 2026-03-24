@@ -1,0 +1,131 @@
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+import sqlite3
+import time
+
+app = Flask(__name__)
+CORS(app)
+
+# DATABASE
+def db():
+    return sqlite3.connect("database.db")
+
+def init():
+    conn = db()
+    c = conn.cursor()
+
+    c.execute("CREATE TABLE IF NOT EXISTS users (wallet TEXT PRIMARY KEY, points INTEGER DEFAULT 0)")
+    c.execute("CREATE TABLE IF NOT EXISTS tokens (name TEXT, symbol TEXT, supply INTEGER, creator TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS events (id TEXT, name TEXT, reward INTEGER)")
+    c.execute("CREATE TABLE IF NOT EXISTS claims (wallet TEXT, event_id TEXT)")
+
+    conn.commit()
+    conn.close()
+
+init()
+
+# FRONTEND
+@app.route("/")
+def home():
+    return render_template("index.html")
+
+# WALLET
+@app.route("/connect_wallet", methods=["POST"])
+def connect_wallet():
+    wallet = request.json["wallet"]
+
+    conn = db()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO users VALUES (?,0)", (wallet,))
+    conn.commit()
+    conn.close()
+
+    return {"msg":"connected"}
+
+# CREATE TOKEN
+@app.route("/create_token", methods=["POST"])
+def create_token():
+    data = request.json
+
+    conn = db()
+    c = conn.cursor()
+    c.execute("INSERT INTO tokens VALUES (?,?,?,?)",
+              (data["name"], data["symbol"], data["supply"], data["wallet"]))
+    conn.commit()
+    conn.close()
+
+    return {"msg":"token created"}
+
+# GET TOKENS
+@app.route("/tokens")
+def tokens():
+    conn = db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM tokens")
+    rows = c.fetchall()
+    conn.close()
+
+    return jsonify([
+        {"name":r[0],"symbol":r[1],"supply":r[2]}
+        for r in rows
+    ])
+
+# CREATE EVENT
+@app.route("/create_event", methods=["POST"])
+def create_event():
+    name = request.json["name"]
+    event_id = "EVT_" + str(int(time.time()))
+
+    conn = db()
+    c = conn.cursor()
+    c.execute("INSERT INTO events VALUES (?,?,50)", (event_id, name))
+    conn.commit()
+    conn.close()
+
+    return {"id":event_id}
+
+# CLAIM REWARD
+@app.route("/claim_reward", methods=["POST"])
+def claim():
+    wallet = request.json["wallet"]
+    event_id = request.json["event_id"]
+
+    conn = db()
+    c = conn.cursor()
+
+    c.execute("SELECT * FROM claims WHERE wallet=? AND event_id=?", (wallet,event_id))
+    if c.fetchone():
+        return {"error":"already claimed"}
+
+    c.execute("SELECT reward FROM events WHERE id=?", (event_id,))
+    row = c.fetchone()
+
+    if not row:
+        return {"error":"invalid"}
+
+    reward = row[0]
+
+    c.execute("UPDATE users SET points = points + ? WHERE wallet=?", (reward,wallet))
+    c.execute("INSERT INTO claims VALUES (?,?)", (wallet,event_id))
+
+    conn.commit()
+    conn.close()
+
+    return {"reward":reward}
+
+# LEADERBOARD
+@app.route("/leaderboard")
+def leaderboard():
+    conn = db()
+    c = conn.cursor()
+    c.execute("SELECT wallet,points FROM users ORDER BY points DESC")
+    rows = c.fetchall()
+    conn.close()
+
+    return jsonify([
+        {"wallet":r[0],"points":r[1]}
+        for r in rows
+    ])
+
+if __name__ == "__main__":
+    app.run(debug=True)

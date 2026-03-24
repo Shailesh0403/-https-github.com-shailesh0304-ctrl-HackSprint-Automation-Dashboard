@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Token Launchpad</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/ethers/dist/ethers.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+</head>
+
+<body class="bg-black text-white p-6">
+
+<h1 class="text-3xl text-purple-400">Student Token Launchpad 🚀</h1>
+
+<button onclick="connectWallet()" class="bg-purple-600 px-4 py-2 mt-4">Connect Wallet</button>
+<p id="wallet"></p>
+
+<hr class="my-6">
+
+<h2>Create Token</h2>
+<input id="name" placeholder="Name" class="text-black">
+<input id="symbol" placeholder="Symbol" class="text-black">
+<input id="supply" placeholder="Supply" class="text-black">
+
+<button onclick="createToken()" class="bg-green-600 px-3 py-1">Create</button>
+
+<div id="tokens"></div>
+
+<hr class="my-6">
+
+<h2>QR Event</h2>
+<input id="eventName" placeholder="Event" class="text-black">
+<button onclick="createQR()" class="bg-blue-600 px-3 py-1">Generate QR</button>
+<canvas id="qr"></canvas>
+
+<button onclick="scanQR()" class="bg-pink-600 px-3 py-1 mt-4">Scan</button>
+<div id="reader"></div>
+
+<hr class="my-6">
+
+<h2>Leaderboard</h2>
+<div id="leaderboard"></div>
+
+<script>
+
+let wallet = "";
+
+async function connectWallet(){
+  const provider = new ethers.providers.Web3Provider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  const signer = provider.getSigner();
+  wallet = await signer.getAddress();
+
+  document.getElementById("wallet").innerText = wallet;
+
+  await fetch("/connect_wallet", {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({wallet})
+  });
+}
+
+async function createToken(){
+  await fetch("/create_token", {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      name:document.getElementById("name").value,
+      symbol:document.getElementById("symbol").value,
+      supply:document.getElementById("supply").value,
+      wallet
+    })
+  });
+  loadTokens();
+}
+
+async function loadTokens(){
+  let res = await fetch("/tokens");
+  let data = await res.json();
+
+  document.getElementById("tokens").innerHTML =
+    data.map(t=>`<div>${t.name}</div>`).join("");
+}
+
+async function createQR(){
+  let res = await fetch("/create_event", {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:document.getElementById("eventName").value})
+  });
+
+  let data = await res.json();
+  QRCode.toCanvas(document.getElementById("qr"), data.id);
+}
+
+function scanQR(){
+  const qr = new Html5Qrcode("reader");
+
+  qr.start({ facingMode: "environment" }, { fps:10, qrbox:250 },
+  async (decoded)=>{
+    await fetch("/claim_reward", {
+      method:"POST",
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({wallet, event_id:decoded})
+    });
+
+    alert("Reward claimed!");
+    qr.stop();
+    loadLeaderboard();
+  });
+}
+
+async function loadLeaderboard(){
+  let res = await fetch("/leaderboard");
+  let data = await res.json();
+
+  document.getElementById("leaderboard").innerHTML =
+    data.map(u=>`<div>${u.wallet.slice(0,6)}... : ${u.points}</div>`).join("");
+}
+
+loadTokens();
+loadLeaderboard();
+
+</script>
+
+</body>
+</html>
